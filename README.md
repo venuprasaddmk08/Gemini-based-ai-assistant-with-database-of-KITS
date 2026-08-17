@@ -33,3 +33,6 @@
 15. <a href="https://github.com/venuprasaddmk08/Gemini-based-ai-assistant-with-database-of-KITS" target="_blank">
   <img src="https://img.shields.io/badge/View%20Source%20Code-GitHub-black?style=for-the-badge&logo=github" alt="View Source Code">
 </a>
+16. <a href="https://venuprasaddmk08.github.io/Gemini-based-ai-assistant-with-database-of-KITS/" target="_blank">
+  <img src="https://img.shields.io/badge/Visit%20Project%20Website-GitHub%20Pages-blue?style=for-the-badge" alt="Visit Project Website">
+</a>
