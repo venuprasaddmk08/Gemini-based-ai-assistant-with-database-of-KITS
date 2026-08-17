@@ -7,7 +7,6 @@ import pyttsx3
 import openpyxl
 from google import genai
 
-
 # ==============================
 # SETTINGS
 # ==============================
@@ -18,11 +17,8 @@ MIC_DEVICE = "hw:3,0"
 SAMPLE_RATE = 48000
 CHANNELS = 1
 
-# Main database
-EXCEL_FILE = "database.xlsx"
-
-# Folder containing machine databases
-MACHINE_DATABASE_FOLDER = "Karunya_Machine_Knowledge_Base_Excel"
+# ALL Excel files go inside this folder
+KNOWLEDGE_BASE_FOLDER = "Karunya_Machine_Knowledge_Base_Excel"
 
 
 # ==============================
@@ -43,218 +39,186 @@ client = genai.Client(api_key=api_key)
 # TEXT TO SPEECH
 # ==============================
 
-engine = pyttsx3.init()
-
-
 def speak(text):
 
+    # Keep the original answer visible in the terminal
     print(f"{BOT_NAME}: {text}")
 
-    # Remove Markdown symbols from spoken response
-    speech_text = re.sub(r"[*_#`~]", "", text)
+    # Remove Markdown symbols before speaking
+    clean_text = re.sub(r"[*_#`]", "", text)
+
+    # Remove bullet formatting
+    clean_text = re.sub(r"^\s*[-•]\s*", "", clean_text)
+
+    # Clean extra spaces/newlines
+    clean_text = re.sub(r"\s+", " ", clean_text).strip()
 
     try:
 
-        engine.say(speech_text)
-        engine.runAndWait()
+        # Generate speech and send it directly to PulseAudio/PipeWire
+        speech = subprocess.Popen(
+            ["espeak-ng", "-s", "150", "--stdout", clean_text],
+            stdout=subprocess.PIPE
+        )
+
+        subprocess.run(
+            [
+                "paplay",
+                "--device=bluez_output.AA_53_D4_B4_A2_C8.1"
+            ],
+            stdin=speech.stdout,
+            check=True
+        )
+
+        speech.stdout.close()
+        speech.wait()
 
     except Exception as e:
 
         print("TTS error:", e)
 
-
 # ==============================
-# LOAD ONE EXCEL FILE
-# ==============================
-
-def load_excel_file(filename):
-
-    records = []
-
-    try:
-
-        workbook = openpyxl.load_workbook(
-            filename,
-            data_only=True
-        )
-
-        for sheet in workbook.worksheets:
-
-            # Ignore empty sheets
-            if sheet.max_row < 2:
-                continue
-
-            # First row = headers
-            headers = []
-
-            for cell in sheet[1]:
-
-                if cell.value is None:
-                    headers.append("")
-                else:
-                    headers.append(
-                        str(cell.value).strip()
-                    )
-
-            # Read rows
-            for row in sheet.iter_rows(
-                min_row=2,
-                values_only=True
-            ):
-
-                # Skip completely empty rows
-                if not any(
-                    value is not None
-                    for value in row
-                ):
-                    continue
-
-                item = {}
-
-                for i, header in enumerate(headers):
-
-                    if not header:
-                        continue
-
-                    if i < len(row):
-                        value = row[i]
-                    else:
-                        value = ""
-
-                    if value is None:
-                        value = ""
-
-                    item[header] = str(value).strip()
-
-                if item:
-
-                    # Store where the information came from
-                    item["_source"] = os.path.basename(
-                        filename
-                    )
-
-                    item["_sheet"] = sheet.title
-
-                    records.append(item)
-
-        workbook.close()
-
-    except Exception as e:
-
-        print(
-            f"Excel database error in "
-            f"{filename}: {e}"
-        )
-
-    return records
-
-
-# ==============================
-# LOAD ALL DATABASES
+# LOAD ALL EXCEL DATABASES
 # ==============================
 
-def load_all_databases():
+def load_database():
 
     database = []
 
-    # --------------------------------
-    # MAIN database.xlsx
-    # --------------------------------
+    # Check knowledge-base folder
+    if not os.path.isdir(KNOWLEDGE_BASE_FOLDER):
 
-    print()
-    print("Loading main database...")
-
-    if os.path.exists(EXCEL_FILE):
-
-        records = load_excel_file(
-            EXCEL_FILE
-        )
-
-        database.extend(records)
-
+        print()
         print(
-            f"database.xlsx: "
-            f"{len(records)} records"
+            f"WARNING: Folder not found: "
+            f"{KNOWLEDGE_BASE_FOLDER}"
         )
 
-    else:
+        return database
 
-        print(
-            f"WARNING: {EXCEL_FILE} not found."
-        )
+    # Find every Excel file
+    excel_files = []
 
+    for filename in os.listdir(KNOWLEDGE_BASE_FOLDER):
 
-    # --------------------------------
-    # MACHINE DATABASES
-    # --------------------------------
+        if filename.lower().endswith(".xlsx"):
 
-    print()
-    print(
-        "Loading machine knowledge base..."
-    )
-
-    if os.path.isdir(
-        MACHINE_DATABASE_FOLDER
-    ):
-
-        excel_files = sorted(
-            filename
-            for filename in os.listdir(
-                MACHINE_DATABASE_FOLDER
-            )
-            if filename.lower().endswith(
-                ".xlsx"
-            )
-        )
-
-        if not excel_files:
-
-            print(
-                "No Excel files found in "
-                "machine database folder."
-            )
-
-        for filename in excel_files:
-
-            full_path = os.path.join(
-                MACHINE_DATABASE_FOLDER,
+            filepath = os.path.join(
+                KNOWLEDGE_BASE_FOLDER,
                 filename
             )
 
-            records = load_excel_file(
-                full_path
-            )
+            excel_files.append(filepath)
 
-            database.extend(records)
+    # No Excel files
+    if not excel_files:
 
-            print(
-                f"{filename}: "
-                f"{len(records)} records"
-            )
-
-    else:
-
+        print()
         print(
-            "WARNING: Machine database folder "
-            "not found."
+            "WARNING: No Excel files found in "
+            f"{KNOWLEDGE_BASE_FOLDER}"
         )
 
-        print(
-            f"Expected folder: "
-            f"{MACHINE_DATABASE_FOLDER}"
-        )
-
-
-    # --------------------------------
-    # TOTAL
-    # --------------------------------
+        return database
 
     print()
     print("=" * 50)
+    print("LOADING KITS KNOWLEDGE BASE")
+    print("=" * 50)
+
+    # Load every Excel file
+    for excel_file in sorted(excel_files):
+
+        print(
+            f"Loading: "
+            f"{os.path.basename(excel_file)}"
+        )
+
+        try:
+
+            workbook = openpyxl.load_workbook(
+                excel_file,
+                data_only=True
+            )
+
+            for sheet in workbook.worksheets:
+
+                # Skip empty sheets
+                if sheet.max_row < 2:
+                    continue
+
+                headers = []
+
+                # First row contains column names
+                for cell in sheet[1]:
+
+                    if cell.value is not None:
+
+                        headers.append(
+                            str(cell.value).strip()
+                        )
+
+                    else:
+
+                        headers.append("")
+
+                # Read all records
+                for row in sheet.iter_rows(
+                    min_row=2,
+                    values_only=True
+                ):
+
+                    item = {}
+
+                    for i, value in enumerate(row):
+
+                        if i >= len(headers):
+                            continue
+
+                        header = headers[i]
+
+                        if not header:
+                            continue
+
+                        if value is not None:
+
+                            item[header] = value
+
+                    if item:
+
+                        # Keep track of where the record came from
+                        item["_source_file"] = (
+                            os.path.basename(
+                                excel_file
+                            )
+                        )
+
+                        item["_source_sheet"] = (
+                            sheet.title
+                        )
+
+                        database.append(item)
+
+            workbook.close()
+
+        except Exception as e:
+
+            print(
+                f"ERROR loading "
+                f"{os.path.basename(excel_file)}:"
+            )
+
+            print(e)
+
+    print()
+    print(
+        f"Database loaded: "
+        f"{len(database)} records"
+    )
 
     print(
-        f"TOTAL DATABASE RECORDS: "
-        f"{len(database)}"
+        f"Excel files loaded: "
+        f"{len(excel_files)}"
     )
 
     print("=" * 50)
@@ -263,7 +227,51 @@ def load_all_databases():
     return database
 
 
-DATABASE = load_all_databases()
+DATABASE = load_database()
+
+
+# ==============================
+# NORMALIZE PC REFERENCES
+# ==============================
+
+def normalize_pc_text(text):
+
+    text = str(text).lower()
+
+    replacements = {
+
+        "computer number": "pc",
+        "computer no": "pc",
+        "computer #": "pc",
+        "computer": "pc",
+
+        "machine number": "pc",
+        "machine no": "pc",
+        "machine #": "pc",
+        "machine": "pc",
+
+        "pc number": "pc",
+        "pc no": "pc",
+        "pc #": "pc",
+    }
+
+    for old, new in replacements.items():
+
+        text = text.replace(
+            old,
+            new
+        )
+
+    # PC 4 -> PC 04
+    # PC 04 -> PC 04
+    text = re.sub(
+        r"\bpc[\s_-]*0*(\d+)\b",
+        lambda match:
+        f"pc {int(match.group(1)):02d}",
+        text
+    )
+
+    return text
 
 
 # ==============================
@@ -272,194 +280,194 @@ DATABASE = load_all_databases()
 
 def search_database(question):
 
-    question_lower = question.lower()
+    question_lower = question.lower().strip()
 
-
-    # ==========================================
-    # ASKING FOR ALL PCs
-    # ==========================================
-
-    all_pc_request = any(
-        phrase in question_lower
-        for phrase in [
-            "all pcs",
-            "all pc",
-            "all computers",
-            "what pcs",
-            "which pcs",
-            "what computers",
-            "which computers",
-            "list the pcs",
-            "list all pcs",
-            "list the computers",
-            "pcs do we have",
-            "computers do we have",
-            "how many pcs",
-            "how many computers",
-            "what computers do we have"
-        ]
-    )
-
-
-    if all_pc_request:
-
-        pc_results = []
-
-        for item in DATABASE:
-
-            combined = " ".join(
-                str(value).lower()
-                for key, value in item.items()
-                if not key.startswith("_")
-                and value is not None
-            )
-
-            # Look for PC records
-            if (
-                "pc" in combined
-                or "computer" in combined
-            ):
-
-                pc_results.append(item)
-
-        if pc_results:
-
-            return pc_results
-
-
-    # ==========================================
-    # SPECIFIC PC
-    # ==========================================
-
-    pc_match = re.search(
-        r"\bpc\s*(?:number\s*)?(\d+)\b",
+    normalized_question = normalize_pc_text(
         question_lower
     )
 
+    results = []
+
+    # --------------------------------
+    # CHECK FOR SPECIFIC PC
+    # --------------------------------
+
+    pc_match = re.search(
+        r"\bpc\s+(\d+)\b",
+        normalized_question
+    )
 
     if pc_match:
 
-        pc_number = int(
+        requested_pc = int(
             pc_match.group(1)
         )
 
-        possible_ids = [
-
-            f"pc{pc_number}",
-
-            f"pc{pc_number:02d}",
-
-            f"pc{pc_number:03d}"
-
-        ]
-
+        print(
+            f"Database search: "
+            f"looking for PC "
+            f"{requested_pc:02d}"
+        )
 
         pc_results = []
 
-
         for item in DATABASE:
 
-            combined = " ".join(
+            searchable_text = " ".join(
+
                 str(value).lower()
+
                 for key, value in item.items()
+
                 if not key.startswith("_")
                 and value is not None
             )
 
-            compact = combined.replace(
-                " ",
-                ""
+            normalized_database = (
+                normalize_pc_text(
+                    searchable_text
+                )
             )
 
+            database_pc_match = re.search(
+                r"\bpc\s+(\d+)\b",
+                normalized_database
+            )
 
-            for pc_id in possible_ids:
+            if database_pc_match:
 
-                if pc_id in compact:
+                database_pc = int(
+                    database_pc_match.group(1)
+                )
+
+                if database_pc == requested_pc:
 
                     pc_results.append(item)
 
-                    break
-
-
         if pc_results:
+
+            print(
+                f"Database match found: "
+                f"PC {requested_pc:02d}"
+            )
 
             return pc_results
 
+        print(
+            f"No direct PC "
+            f"{requested_pc:02d} match found."
+        )
 
-    # ==========================================
-    # NORMAL SEARCH
-    # ==========================================
+    # --------------------------------
+    # GENERAL SEARCH
+    # --------------------------------
 
-    results = []
+    ignored_words = {
 
+        "what",
+        "whats",
+        "what's",
+        "is",
+        "are",
+        "the",
+        "of",
+        "for",
+        "about",
+        "tell",
+        "me",
+        "give",
+        "please",
+        "can",
+        "you",
+        "could",
+        "would",
+        "do",
+        "does",
+        "have",
+        "has",
+        "our",
+        "we",
+        "i",
+        "know",
+        "information",
+        "specifications",
+        "specification",
+        "details",
+        "detail",
+        "show",
+        "list",
+        "tell"
+    }
+
+    words = re.findall(
+        r"[a-zA-Z0-9]+",
+        normalized_question
+    )
+
+    question_words = [
+
+        word
+
+        for word in words
+
+        if len(word) > 2
+        and word not in ignored_words
+    ]
 
     for item in DATABASE:
 
         score = 0
 
-
-        # --------------------------------
-        # KEYWORDS
-        # --------------------------------
-
-        keywords = str(
-            item.get("Keywords", "")
-        ).lower()
-
-
-        if keywords:
-
-            for keyword in keywords.split(","):
-
-                keyword = keyword.strip()
-
-                if (
-                    keyword
-                    and keyword in question_lower
-                ):
-
-                    score += 20
-
-
-        # --------------------------------
-        # SEARCH ALL FIELDS
-        # --------------------------------
-
+        # Search every field
         for key, value in item.items():
 
             if key.startswith("_"):
                 continue
 
+            if value is None:
+                continue
+
+            key_text = str(
+                key
+            ).lower()
+
             value_text = str(
                 value
             ).lower()
 
+            # Column name match
+            for word in question_words:
 
-            if not value_text:
-                continue
+                if word in key_text:
 
+                    score += 3
 
-            # Exact phrase
-            if value_text in question_lower:
+            # Value match
+            for word in question_words:
 
-                score += 5
+                if word in value_text:
 
+                    score += 2
 
-            # Individual words
-            for word in question_lower.split():
+        # Keywords column gets extra importance
+        if "Keywords" in item:
 
-                word = word.strip(
-                    ".,?!:;()[]{}"
-                )
+            keywords = str(
+                item["Keywords"]
+            ).lower()
 
+            if keywords:
 
-                if (
-                    len(word) >= 2
-                    and word in value_text
+                for keyword in re.split(
+                    r"[,;]",
+                    keywords
                 ):
 
-                    score += 1
+                    keyword = keyword.strip()
 
+                    if keyword and keyword in question_lower:
+
+                        score += 20
 
         if score > 0:
 
@@ -467,22 +475,26 @@ def search_database(question):
                 (score, item)
             )
 
-
-    # Best matches first
-
+    # Highest matches first
     results.sort(
         key=lambda x: x[0],
         reverse=True
     )
 
+    matched_records = [
 
-    # Return top 5 for normal questions
-
-    return [
         item
-        for score, item
-        in results[:5]
+
+        for score, item in results[:10]
     ]
+
+    print(
+        f"Database search found "
+        f"{len(matched_records)} "
+        f"matching records."
+    )
+
+    return matched_records
 
 
 # ==============================
@@ -503,22 +515,36 @@ def listen():
             "Speak now!"
         )
 
-
         subprocess.run(
+
             [
                 "arecord",
-                "-D", MIC_DEVICE,
-                "-f", "S16_LE",
-                "-r", str(SAMPLE_RATE),
-                "-c", str(CHANNELS),
-                "-t", "wav",
-                "-d", "5",
+
+                "-D",
+                MIC_DEVICE,
+
+                "-f",
+                "S16_LE",
+
+                "-r",
+                str(SAMPLE_RATE),
+
+                "-c",
+                str(CHANNELS),
+
+                "-t",
+                "wav",
+
+                "-d",
+                "5",
+
                 "-q",
+
                 wav_file
             ],
+
             check=True
         )
-
 
         print(
             "Recording finished."
@@ -528,9 +554,7 @@ def listen():
             "Converting speech to text..."
         )
 
-
         recognizer = sr.Recognizer()
-
 
         with sr.AudioFile(
             wav_file
@@ -539,7 +563,6 @@ def listen():
             audio = recognizer.record(
                 source
             )
-
 
         try:
 
@@ -554,7 +577,6 @@ def listen():
 
             return text
 
-
         except sr.UnknownValueError:
 
             print(
@@ -564,17 +586,14 @@ def listen():
 
             return None
 
-
         except sr.RequestError as e:
 
             print(
                 "Speech recognition "
-                "service error:",
-                e
+                f"service error: {e}"
             )
 
             return None
-
 
     except Exception as e:
 
@@ -585,14 +604,15 @@ def listen():
 
         return None
 
-
     finally:
 
         if os.path.exists(
             wav_file
         ):
 
-            os.remove(wav_file)
+            os.remove(
+                wav_file
+            )
 
 
 # ==============================
@@ -605,146 +625,115 @@ def ask_gemini(question):
         question
     )
 
-
-    database_text = ""
-
-
     if database_results:
 
         database_text = (
-            "\n\nKITS KNOWLEDGE BASE:\n"
+            "\nAUTHORITATIVE "
+            "STUDIO DATABASE:\n"
         )
 
-
-        for item in database_results:
+        for number, item in enumerate(
+            database_results,
+            start=1
+        ):
 
             database_text += (
-                "\n--- DATABASE RECORD ---\n"
+                f"\n--- Record {number} ---\n"
             )
-
 
             for key, value in item.items():
 
-                # Don't show internal fields
+                # Don't send internal fields
                 if key.startswith("_"):
                     continue
 
-
-                if value:
+                if value is not None:
 
                     database_text += (
                         f"{key}: {value}\n"
                     )
 
-
-            # Tell Gemini which file
-            # supplied the information
-
-            if item.get("_source"):
-
-                database_text += (
-                    f"Source file: "
-                    f"{item['_source']}\n"
-                )
-
-
-            if item.get("_sheet"):
-
-                database_text += (
-                    f"Sheet: "
-                    f"{item['_sheet']}\n"
-                )
-
-
     else:
 
         database_text = (
-            "\nNo matching database "
-            "information was found.\n"
+            "\nNo matching information "
+            "was found in the database.\n"
         )
 
-
-    # ==========================================
-    # GEMINI PROMPT
-    # ==========================================
-
     prompt = f"""
-You are {BOT_NAME}, an AI assistant for a studio.
+You are {BOT_NAME}, the AI assistant
+for KITS studio.
 
-Answer the user's question clearly and naturally.
+Answer the user's question clearly
+and naturally.
 
-You have access to the KITS studio knowledge base.
+IMPORTANT DATABASE RULES:
 
-IMPORTANT RULES:
+1. The Excel database is the
+   authoritative source for studio
+   equipment information.
 
-1. Use the database information as the
-   authoritative source for studio information.
+2. Use the database whenever it
+   contains the answer.
 
-2. Do not invent equipment specifications.
+3. Do NOT invent specifications.
 
-3. If a specification is not present in the
-   database, say that it is not available.
+4. Do NOT assume that information
+   about one machine applies to
+   another machine.
 
-4. If the user asks about a specific PC,
-   use the matching PC record.
+5. PC 4, PC 04, computer 4,
+   computer number 4, and machine 4
+   refer to the same PC.
 
-5. If the user asks about ALL PCs, use all
-   PC records provided in the database.
+6. If the database contains the
+   requested information, answer
+   directly.
 
-6. If the user asks about a specific machine,
-   use the matching machine record.
+7. If the database does not contain
+   the information, clearly say that
+   it is not available in the studio
+   database.
 
-7. If the database contains the answer,
-   answer directly.
+8. You can combine information from
+   multiple database records if
+   necessary.
 
-8. Do not say that you only have access to
-   one PC if multiple PC records are provided.
+9. Do not mention Excel filenames
+   unless the user asks.
 
-9. Keep answers concise and natural because
-   the answer will be spoken aloud.
-
-KITS KNOWLEDGE BASE:
+DATABASE:
 {database_text}
 
 USER QUESTION:
 {question}
 """
 
+    response = client.models.generate_content(
 
-    try:
+        model="gemini-3.6-flash",
 
-        response = client.models.generate_content(
-            model="gemini-3.6-flash",
-            contents=prompt
-        )
+        contents=prompt
+    )
 
-        return response.text
-
-
-    except Exception as e:
-
-        print(
-            "Gemini error:",
-            e
-        )
-
-        return (
-            "Sorry, I had trouble getting "
-            "that information."
-        )
+    return response.text
 
 
 # ==============================
 # MAIN ASSISTANT
 # ==============================
 
-print("=" * 50)
+print(
+    "=" * 50
+)
 
 print(
     "             KITS HELPER"
 )
 
-print("=" * 50)
+print(
+    "=" * 50
+)
 
 print()
 
@@ -764,9 +753,7 @@ print(
 
 print()
 
-
 # Initial greeting
-
 speak(
     "Hello. KITS Helper is ready. "
     "How can I help you?"
@@ -785,7 +772,6 @@ while True:
             "Press ENTER to speak: "
         ).strip()
 
-
         if command.lower() in [
             "quit",
             "exit"
@@ -797,14 +783,11 @@ while True:
 
             break
 
-
         user_input = listen()
-
 
         if not user_input:
 
             continue
-
 
         if user_input.lower() in [
             "quit",
@@ -818,26 +801,21 @@ while True:
 
             break
 
-
         print()
 
         print(
             "Thinking..."
         )
 
-
         answer = ask_gemini(
             user_input
         )
-
 
         speak(
             answer
         )
 
-
         print()
-
 
     except KeyboardInterrupt:
 
@@ -846,7 +824,6 @@ while True:
         )
 
         break
-
 
     except Exception as e:
 
